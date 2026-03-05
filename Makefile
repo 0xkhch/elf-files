@@ -1,5 +1,5 @@
 CC = gcc 
-FLAGS = -Wall -Wextra -Werror -ggdb -std=c99
+FLAGS = -Wall -Wextra -ggdb -std=c99 
 OUTPUT = build/elf
 src = elf.c
 
