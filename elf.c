@@ -29,6 +29,7 @@ shdr_tabl* shdr_tabl_init(size_t len)
 void shdr_tabl_free(shdr_tabl* arr)
 {
     assert(arr != NULL && "[ERROR] array is null");
+    free(arr->items);
     free(arr);
 }
 
@@ -64,6 +65,7 @@ size_t str_len(fixed_str* str, size_t start) {
 
 void fixed_str_free(fixed_str* str) {
     assert(str != NULL && "[ERROR] array is null");
+    free(str->items);
     free(str);
 }
 
@@ -247,7 +249,6 @@ int main(int argc, char** argv)
     return 0;
 
 fail:
-    shdr_tabl_free(arr);
     fclose(file);
     return 1;
 }
