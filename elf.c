@@ -1,21 +1,13 @@
 #include "elf.h"
-#include <assert.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+#define FIXED_STR_IMPLEMENTATION
+#include "fixed_str.h"
+
 
 typedef struct {
     Elf32_Shdr* items;
     size_t len;
 } shdr_tabl;
-
-
-typedef struct {
-    char* items;
-    size_t len;
-} fixed_str;
-
 
 shdr_tabl* shdr_tabl_init(size_t len)
 {
@@ -25,48 +17,11 @@ shdr_tabl* shdr_tabl_init(size_t len)
     return arr;
 }
 
-
 void shdr_tabl_free(shdr_tabl* arr)
 {
     assert(arr != NULL && "[ERROR] array is null");
     free(arr->items);
     free(arr);
-}
-
-
-fixed_str* fixed_str_init(size_t len)
-{
-    fixed_str* str = (fixed_str*)calloc(1, sizeof(*str));
-    str->items = (char*)calloc(len, sizeof(char*));
-    str->len = len;
-    return str;
-}
-
-// upto end 
-fixed_str* str_slice(const fixed_str* str, size_t start, size_t end)
-{
-    assert(str != NULL && "[ERROR] str is null");
-    size_t slice_len = end - start;
-    fixed_str* slice = fixed_str_init(slice_len + 1);
-    for (size_t i = 0; i < slice_len; i++) {
-        slice->items[i] = str->items[start + i];
-    }
-    slice->items[slice_len] = 0;
-    return slice;
-}
-
-size_t str_len(fixed_str* str, size_t start) {
-    assert(str != NULL && "[ERROR] array is null");
-    size_t len = 0;
-    while(str->items[start + len] != 0)
-        len++;
-    return len;
-}
-
-void fixed_str_free(fixed_str* str) {
-    assert(str != NULL && "[ERROR] array is null");
-    free(str->items);
-    free(str);
 }
 
 void dump_hdr(Elf32_Ehdr* hdr)
@@ -168,33 +123,80 @@ size_t read_shdr(Elf32_Shdr* shdr, FILE* file)
     return n;
 }
 
+void read_shdr_tabl(shdr_tabl* tabl, size_t n, FILE* file)
+{
+    // every section header is stored sequentially in the table,
+    // first entry always null and zeroed out
+    assert(tabl != NULL && "[ERROR] tabl is null");
+    for (size_t i = 0; i < n; i++) {
+        printf("\nSection %d\n", (int) i);
+        read_shdr(&tabl->items[i], file);
+        dump_shdr(&tabl->items[i]);
+    }
+}
 
 void print_section_names(shdr_tabl* tabl, size_t str_tabl_i, FILE* file)
 {
     assert(tabl != NULL && "[ERROR] tabl is null");
     
-    //TODO: remove this with a mallox buffer
     Elf32_Word buffer_size = tabl->items[str_tabl_i].sh_size;
-    fixed_str* str  = fixed_str_init(buffer_size);
+    fs_t* str_buff = fs_init(buffer_size);
 
     fseek(file, tabl->items[str_tabl_i].sh_offset, SEEK_SET);
-    fread(str->items, sizeof(*str->items), buffer_size, file);
+    fread(str_buff->items, sizeof(*str_buff->items), buffer_size, file);
     for (size_t i = 0; i < tabl->len; i++) {
         Elf32_Word element = tabl->items[i].sh_name;
-        size_t slice_len = str_len(str, element);
-        fixed_str* slice  = str_slice(str, element, element + slice_len);
+        size_t slice_len = fs_len(str_buff, element);
+        fs_t* slice  = fs_slice(str_buff, element, element + slice_len);
         printf("Section %d name at %d: %s\n", (int)i, element, slice->items);
-        fixed_str_free(slice);
+        fs_free(slice);
     }
-    fixed_str_free(str);
+    fs_free(str_buff);
+}
+
+
+size_t read_phdr(Elf32_Phdr* phdr, FILE* file)
+{
+    size_t n = 0;
+    n += fread(&phdr->p_type,  sizeof(&phdr->p_type), 1, file);
+    n += fread(&phdr->p_offset,sizeof(&phdr->p_offset), 1, file);
+    n += fread(&phdr->p_vaddr, sizeof(&phdr->p_vaddr), 1, file);
+    n += fread(&phdr->p_paddr, sizeof(&phdr->p_paddr), 1, file);
+    n += fread(&phdr->p_filesz,sizeof(&phdr->p_filesz), 1, file);
+    n += fread(&phdr->p_memsz, sizeof(&phdr->p_memsz), 1, file);
+    n += fread(&phdr->p_flags, sizeof(&phdr->p_flags), 1, file);
+    n += fread(&phdr->p_align, sizeof(&phdr->p_align), 1, file);
+    return n;
+}
+void dump_phdr(Elf32_Phdr* phdr)
+{
+    assert(phdr != NULL && "[ERROR] hdr is null...");
+    printf("\n");
+    printf("P_TYPE      |P_OFFSET    |P_VADDR     |P_PADDR     |P_FILESZ    |P_MEMSZ     |P_FLAGS     |\n");
+    printf("------------|------------|------------|------------|------------|------------|------------|\n");
+    printf("%-12u|", phdr->p_type);
+    printf("%-12u|", phdr->p_offset);
+    printf("%-12x|", phdr->p_vaddr);
+    printf("%-12x|", phdr->p_paddr);
+    printf("%-12u|", phdr->p_filesz);
+    printf("%-12u|", phdr->p_memsz);
+    printf("%-12u|\n", phdr->p_flags);
+
+    printf("------------|------------|------------|------------|------------|------------|------------|\n");
+    printf("P_ALIGN     |            |            |\n");
+    printf("------------|------------|------------|------------|------------|------------|------------|\n");
+    printf("%-12u|", phdr->p_align);
+    printf("------------|------------|------------|------------|------------|------------|------------|\n");
 }
 
 int main(int argc, char** argv)
 {
     char* file_name;
     FILE* file;
-    size_t n = 0;
-    shdr_tabl* arr = NULL;
+    size_t n;
+    shdr_tabl* arr;
+    size_t prev_file_loc;
+
     assert(argc == 2 && "[Usage] ./elf <file-name>");
     file_name = argv[argc - 1];
     file = fopen(file_name, "rb");
@@ -225,24 +227,15 @@ int main(int argc, char** argv)
     }
 
     // seek until start of section header table
-    fseek(file, hdr.e_shoff, SEEK_SET);
     arr = shdr_tabl_init(hdr.e_shnum);
-    // every section header is stored sequentially in the table,
-    // first entry always null and zeroed out
-    for (size_t i = 0; i < hdr.e_shnum; i++) {
-        printf("\nSection %d\n", (int) i);
-        n = read_shdr(&arr->items[i], file);
-        if (n != SH_NSTRUCT) {
-            fprintf(stderr, "[ERROR] did not read the correct amount of section header elements\n");
-            goto fail;
-        }
-        dump_shdr(&arr->items[i]);
-    }
-    
-    size_t prev_loc = ftell(file);
-    print_section_names(arr, hdr.e_shstrndx, file);
-    fseek(file, prev_loc, SEEK_SET);
+    prev_file_loc = ftell(file);
+    fseek(file, hdr.e_shoff, SEEK_SET);
+    read_shdr_tabl(arr, hdr.e_shnum, file);
+    fseek(file, prev_file_loc, SEEK_SET);
 
+    prev_file_loc = ftell(file);
+    print_section_names(arr, hdr.e_shstrndx, file);
+    fseek(file, prev_file_loc, SEEK_SET);
 
     shdr_tabl_free(arr);
     fclose(file);

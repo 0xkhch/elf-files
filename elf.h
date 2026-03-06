@@ -1,12 +1,14 @@
 #ifndef ELF_H_
 #define ELF_H_
 
+
 #include <stdint.h>
 #include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <string.h>
+
 /* Execution view
  * |    ELF HEADER    |
  * |------------------|
@@ -50,6 +52,16 @@ typedef struct {
     Elf32_Half e_shstrndx;
 } Elf32_Ehdr;
 
+/* found by ehdr.e_shoff
+ * from start of file
+ * | Section tabl hdr |
+ * |------------------|
+ * |     Section 0    |
+ * |     Section 1    |
+ * |     Section 2    |
+ * |    ..........    |
+ * |------------------|
+ */
 typedef struct {
     Elf32_Word sh_name;
     Elf32_Word sh_type;
@@ -62,6 +74,19 @@ typedef struct {
     Elf32_Word sh_addralign;
     Elf32_Word sh_entsize;
 } Elf32_Shdr;
+
+
+
+typedef struct {
+    Elf32_Word p_type;
+    Elf32_Off  p_offset;
+    Elf32_Addr p_vaddr;
+    Elf32_Addr p_paddr;
+    Elf32_Word p_filesz;
+    Elf32_Word p_memsz;
+    Elf32_Word p_flags;
+    Elf32_Word p_align;
+} Elf32_Phdr;
 
 // section header types
 #define SHT_NULL 0
