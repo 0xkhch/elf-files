@@ -1,4 +1,5 @@
 #include "elf.h"
+#include <stdio.h>
 
 #define FIXED_STR_IMPLEMENTATION
 #include "fixed_str.h"
@@ -9,6 +10,12 @@ typedef struct {
     size_t len;
 } shdr_tabl;
 
+
+typedef struct {
+    Elf32_Phdr* items;
+    size_t len;
+} phdr_tabl;
+
 shdr_tabl* shdr_tabl_init(size_t len)
 {
     shdr_tabl* arr = (shdr_tabl*)calloc(1, sizeof(shdr_tabl));
@@ -18,6 +25,21 @@ shdr_tabl* shdr_tabl_init(size_t len)
 }
 
 void shdr_tabl_free(shdr_tabl* arr)
+{
+    assert(arr != NULL && "[ERROR] array is null");
+    free(arr->items);
+    free(arr);
+}
+
+phdr_tabl* phdr_tabl_init(size_t len)
+{
+    phdr_tabl* arr = (phdr_tabl*)calloc(1, sizeof(phdr_tabl));
+    arr->items = (Elf32_Phdr*)calloc(len, sizeof(Elf32_Phdr));
+    arr->len = len;
+    return arr;
+}
+
+void phdr_tabl_free(phdr_tabl* arr)
 {
     assert(arr != NULL && "[ERROR] array is null");
     free(arr->items);
@@ -63,9 +85,9 @@ void dump_hdr(Elf32_Ehdr* hdr)
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
 }
 
-size_t read_hdr(Elf32_Ehdr* hdr, FILE* file)
+int read_hdr(Elf32_Ehdr* hdr, FILE* file)
 {
-    size_t n = 0;
+    int n = 0;
     n += fread(&hdr->e_ident, sizeof(*hdr->e_ident), EI_NIDENT, file);
     n += fread(&hdr->e_type, sizeof(hdr->e_type), 1, file);
     n += fread(&hdr->e_machine, sizeof(hdr->e_machine), 1, file);
@@ -80,12 +102,35 @@ size_t read_hdr(Elf32_Ehdr* hdr, FILE* file)
     n += fread(&hdr->e_shentsize, sizeof(hdr->e_shentsize), 1, file);
     n += fread(&hdr->e_shnum, sizeof(hdr->e_shnum), 1, file);
     n += fread(&hdr->e_shstrndx, sizeof(hdr->e_shstrndx), 1, file);
+
+
+    if (n != (EI_NIDENT + EI_NSTRUCT)) {
+        fprintf(stderr, "[ERROR] did not read the correct amount of elf header elements\n");
+        return -1;
+    }
+    if (strncmp((const char*)hdr->e_ident, "\x7f" "ELF", EI_NIDENT) == 0) {
+        fprintf(stderr, "[ERROR] Magic numbers do not match up..\n");
+        return -1;
+    }
+    if (hdr->e_type != ET_EXEC) {
+        fprintf(stderr, "[ERROR] not an executable\n");
+        return -1;
+    }
+    if (hdr->e_machine != EM_RISCV) {
+        fprintf(stderr, "[ERROR] only riscv executable\n");
+        return -1;
+    }
+    if (hdr->e_version != EV_CURRENT) {
+        fprintf(stderr, "[ERROR] incorrect elf version\n");
+        return -1;
+    }
     return n;
 }
 
-void dump_shdr(Elf32_Shdr* shdr)
+void dump_shdr(Elf32_Shdr* shdr, size_t i)
 {
     assert(shdr != NULL && "[ERROR] hdr is null...");
+    printf("\nSection %d\n", (int) i);
     printf("\n");
     printf("SH_NAME     |SH_TYPE     |SH_FLAGS    |SH_ADDR     |SH_OFFSET   |SH_SIZE     |SH_LINK     |\n");
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
@@ -106,10 +151,10 @@ void dump_shdr(Elf32_Shdr* shdr)
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
 }
 
-size_t read_shdr(Elf32_Shdr* shdr, FILE* file)
+int read_shdr(Elf32_Shdr* shdr, FILE* file)
 {
     assert(shdr != NULL && "[ERROR] shdr is null");
-    size_t n = 0;
+    int n = 0;
     n += fread(&shdr->sh_name, sizeof(shdr->sh_name), 1, file);
     n += fread(&shdr->sh_type, sizeof(shdr->sh_type), 1, file);
     n += fread(&shdr->sh_flags, sizeof(shdr->sh_flags), 1, file);
@@ -123,19 +168,20 @@ size_t read_shdr(Elf32_Shdr* shdr, FILE* file)
     return n;
 }
 
-void read_shdr_tabl(shdr_tabl* tabl, size_t n, FILE* file)
+void read_shdr_tabl(shdr_tabl* tabl, size_t sh_offset, FILE* file)
 {
     // every section header is stored sequentially in the table,
     // first entry always null and zeroed out
     assert(tabl != NULL && "[ERROR] tabl is null");
-    for (size_t i = 0; i < n; i++) {
-        printf("\nSection %d\n", (int) i);
+    // seek until start of section header table
+    fseek(file, sh_offset, SEEK_SET);
+    for (size_t i = 0; i < tabl->len; i++) {
         read_shdr(&tabl->items[i], file);
-        dump_shdr(&tabl->items[i]);
+        // dump_shdr(&tabl->items[i]);
     }
 }
 
-void print_section_names(shdr_tabl* tabl, size_t str_tabl_i, FILE* file)
+void dump_shdr_names(shdr_tabl* tabl, size_t str_tabl_i, FILE* file)
 {
     assert(tabl != NULL && "[ERROR] tabl is null");
     
@@ -155,26 +201,28 @@ void print_section_names(shdr_tabl* tabl, size_t str_tabl_i, FILE* file)
 }
 
 
-size_t read_phdr(Elf32_Phdr* phdr, FILE* file)
+int read_phdr(Elf32_Phdr* phdr, FILE* file)
 {
-    size_t n = 0;
-    n += fread(&phdr->p_type,  sizeof(&phdr->p_type), 1, file);
-    n += fread(&phdr->p_offset,sizeof(&phdr->p_offset), 1, file);
-    n += fread(&phdr->p_vaddr, sizeof(&phdr->p_vaddr), 1, file);
-    n += fread(&phdr->p_paddr, sizeof(&phdr->p_paddr), 1, file);
-    n += fread(&phdr->p_filesz,sizeof(&phdr->p_filesz), 1, file);
-    n += fread(&phdr->p_memsz, sizeof(&phdr->p_memsz), 1, file);
-    n += fread(&phdr->p_flags, sizeof(&phdr->p_flags), 1, file);
-    n += fread(&phdr->p_align, sizeof(&phdr->p_align), 1, file);
+    assert(phdr != NULL && "[ERROR] phdr is null...");
+    int n = 0;
+    n += fread(&phdr->p_type,  sizeof(phdr->p_type), 1, file);
+    n += fread(&phdr->p_offset, sizeof(phdr->p_offset), 1, file);
+    n += fread(&phdr->p_vaddr, sizeof(phdr->p_vaddr), 1, file);
+    n += fread(&phdr->p_paddr, sizeof(phdr->p_paddr), 1, file);
+    n += fread(&phdr->p_filesz, sizeof(phdr->p_filesz), 1, file);
+    n += fread(&phdr->p_memsz, sizeof(phdr->p_memsz), 1, file);
+    n += fread(&phdr->p_flags, sizeof(phdr->p_flags), 1, file);
+    n += fread(&phdr->p_align, sizeof(phdr->p_align), 1, file);
     return n;
 }
-void dump_phdr(Elf32_Phdr* phdr)
+void dump_phdr(Elf32_Phdr* phdr, size_t i)
 {
-    assert(phdr != NULL && "[ERROR] hdr is null...");
+    assert(phdr != NULL && "[ERROR] phdr is null...");
+    printf("\nSegment %d\n", (int) i);
     printf("\n");
     printf("P_TYPE      |P_OFFSET    |P_VADDR     |P_PADDR     |P_FILESZ    |P_MEMSZ     |P_FLAGS     |\n");
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
-    printf("%-12u|", phdr->p_type);
+    printf("%-12x|", phdr->p_type);
     printf("%-12u|", phdr->p_offset);
     printf("%-12x|", phdr->p_vaddr);
     printf("%-12x|", phdr->p_paddr);
@@ -185,17 +233,68 @@ void dump_phdr(Elf32_Phdr* phdr)
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
     printf("P_ALIGN     |            |            |\n");
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
-    printf("%-12u|", phdr->p_align);
+    printf("%-12u|\n", phdr->p_align);
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
+}
+
+void dump_seg(Elf32_Phdr* segment, size_t i, FILE* file)
+{
+    assert(segment != NULL && "[ERROR] segment is null...");
+    printf("\nSegment %d\n", (int) i);
+
+    fseek(file, segment->p_offset, SEEK_SET);
+
+    size_t addr = 0;
+    size_t col = 0;
+    printf("\n");
+    printf("%08x: ", (int)addr);
+    // filesz in bytes
+    for (size_t j = 0; j < segment->p_filesz / 4; j++) {
+        Elf32_Word half = 0;
+        fread(&half,  sizeof(half), 1, file);
+        printf("%08x ", half);
+
+        if (col >= 4) {
+            printf("\n");
+            printf("%08x: ", (int)addr);
+            col = 0;
+        }
+        else {
+            col++;
+            addr++;
+        }
+    }
+    printf("\n\n");
+}
+
+void read_seg_tabl(phdr_tabl* tabl, size_t ph_offset, FILE* file)
+{
+    assert(tabl != NULL && "[ERROR] tabl is null");
+
+    fseek(file, ph_offset, SEEK_SET);
+    for (size_t i = 0; i < tabl->len; i++) {
+        read_phdr(&tabl->items[i], file);
+        dump_phdr(&tabl->items[i], i);
+    }
+}
+
+
+void dump_segments(phdr_tabl* tabl, FILE* file)
+{
+    assert(tabl != NULL && "[ERROR] tabl is null");
+
+    for (size_t i = 0; i < tabl->len; i++) {
+        if (tabl->items[i].p_type != PT_LOAD) continue;
+        dump_seg(&tabl->items[i], i, file);
+    }
 }
 
 int main(int argc, char** argv)
 {
     char* file_name;
     FILE* file;
-    size_t n;
-    shdr_tabl* arr;
-    size_t prev_file_loc;
+    shdr_tabl* section_tabl;
+    phdr_tabl* segment_tabl;
 
     assert(argc == 2 && "[Usage] ./elf <file-name>");
     file_name = argv[argc - 1];
@@ -203,41 +302,21 @@ int main(int argc, char** argv)
     assert(file != NULL && "[ERROR] failed to open file..");
 
     Elf32_Ehdr hdr = {0};
-    n = read_hdr(&hdr, file);
-    if (n != (EI_NIDENT + EI_NSTRUCT)) {
-        fprintf(stderr, "[ERROR] did not read the correct amount of elf header elements\n");
+    if(read_hdr(&hdr, file) < 0) {
         goto fail;
     }
-    if (strncmp((const char*)hdr.e_ident, "\x7f" "ELF", EI_NIDENT) == 0) {
-        fprintf(stderr, "[ERROR] Magic numbers do not match up..\n");
-        goto fail;
-    }
-    dump_hdr(&hdr);
-    if (hdr.e_type != ET_EXEC) {
-        fprintf(stderr, "[ERROR] not an executable\n");
-        goto fail;
-    }
-    if (hdr.e_machine != EM_RISCV) {
-        fprintf(stderr, "[ERROR] only riscv executable\n");
-        goto fail;
-    }
-    if (hdr.e_version != EV_CURRENT) {
-        fprintf(stderr, "[ERROR] incorrect elf version\n");
-        goto fail;
-    }
+    // dump_hdr(&hdr);
 
-    // seek until start of section header table
-    arr = shdr_tabl_init(hdr.e_shnum);
-    prev_file_loc = ftell(file);
-    fseek(file, hdr.e_shoff, SEEK_SET);
-    read_shdr_tabl(arr, hdr.e_shnum, file);
-    fseek(file, prev_file_loc, SEEK_SET);
+    section_tabl = shdr_tabl_init(hdr.e_shnum);
+    read_shdr_tabl(section_tabl, hdr.e_shoff, file);
+    // dump_shdr_names(section_tabl, hdr.e_shstrndx, file);
+    
+    segment_tabl = phdr_tabl_init(hdr.e_phnum);
+    read_seg_tabl(segment_tabl, hdr.e_phoff, file);
+    dump_segments(segment_tabl, file);
 
-    prev_file_loc = ftell(file);
-    print_section_names(arr, hdr.e_shstrndx, file);
-    fseek(file, prev_file_loc, SEEK_SET);
-
-    shdr_tabl_free(arr);
+    shdr_tabl_free(section_tabl);
+    phdr_tabl_free(segment_tabl);
     fclose(file);
     return 0;
 

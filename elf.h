@@ -75,19 +75,6 @@ typedef struct {
     Elf32_Word sh_entsize;
 } Elf32_Shdr;
 
-
-
-typedef struct {
-    Elf32_Word p_type;
-    Elf32_Off  p_offset;
-    Elf32_Addr p_vaddr;
-    Elf32_Addr p_paddr;
-    Elf32_Word p_filesz;
-    Elf32_Word p_memsz;
-    Elf32_Word p_flags;
-    Elf32_Word p_align;
-} Elf32_Phdr;
-
 // section header types
 #define SHT_NULL 0
 #define SHT_PROGBITS 1
@@ -111,4 +98,19 @@ typedef struct {
 #define SHF_ALLOC 0x2
 #define SHF_EXECINSTR 0x4
 #define SHF_MASKPROC 0xf0000000
+
+
+typedef struct {
+    Elf32_Word p_type;
+    Elf32_Off  p_offset;
+    Elf32_Addr p_vaddr;
+    Elf32_Addr p_paddr;
+    Elf32_Word p_filesz;
+    Elf32_Word p_memsz;
+    Elf32_Word p_flags;
+    Elf32_Word p_align;
+} Elf32_Phdr;
+
+#define PT_LOAD 1
+
 #endif // ELF_H_
