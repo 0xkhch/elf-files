@@ -1,9 +1,8 @@
 #include "elf.h"
-#include <stdio.h>
-
 #define FIXED_STR_IMPLEMENTATION
 #include "fixed_str.h"
 
+#define REVERSE(val) (((val) & 0xff) << 24) | (((val) & 0xff00) << 8) | (((val) & 0xff0000) >> 8) | (((val) & 0xff000000) >> 24);
 
 typedef struct {
     Elf32_Shdr* items;
@@ -237,34 +236,45 @@ void dump_phdr(Elf32_Phdr* phdr, size_t i)
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
 }
 
-void dump_seg(Elf32_Phdr* segment, size_t i, FILE* file)
+static inline size_t is_ascii(int c) {
+    // without control codes
+    if (c > 31 && c < 127) return 1;
+    return 0;
+}
+
+void dump_seg(Elf32_Phdr* segment, size_t num, FILE* file)
 {
     assert(segment != NULL && "[ERROR] segment is null...");
-    printf("\nSegment %d\n", (int) i);
+    printf("\nSegment %d\n", (int) num);
 
     fseek(file, segment->p_offset, SEEK_SET);
 
-    size_t addr = 0;
-    size_t col = 0;
-    printf("\n");
-    printf("%08x: ", (int)addr);
-    // filesz in bytes
-    for (size_t j = 0; j < segment->p_filesz / 4; j++) {
-        Elf32_Word half = 0;
-        fread(&half,  sizeof(half), 1, file);
-        printf("%08x ", half);
+    size_t addr = segment->p_paddr;
+    Elf32_Word buffer[4] = {0};
+    for (size_t i = 0; i < segment->p_filesz / 16; i++) {
+        printf("%08x: ", (int)addr);
+        for (size_t j = 0; j < 4; j++) {
+            Elf32_Word word = 0;
+            fread(&word,  sizeof(word), 1, file); addr = addr + 4;
+            buffer[j] = word;
+            printf("%08x ", word);
+        }
 
-        if (col >= 4) {
-            printf("\n");
-            printf("%08x: ", (int)addr);
-            col = 0;
+        // TODO: this could be done inside of the first loop i think
+        printf("|");
+        for (size_t k = 0; k < 4; k++) {
+            Elf32_Word reversed = REVERSE(buffer[k]); //bruh
+            unsigned char b0 = (unsigned char) (reversed >> 24) & 0xFF;
+            unsigned char b1 = (unsigned char) (reversed >> 16) & 0xFF;
+            unsigned char b2 = (unsigned char) (reversed >>  8) & 0xFF;
+            unsigned char b3 = (unsigned char) (reversed      ) & 0xFF;
+            printf("%c", is_ascii(b0) == 1 ? b0 : '.');
+            printf("%c", is_ascii(b1) == 1 ? b1 : '.');
+            printf("%c", is_ascii(b2) == 1 ? b2 : '.');
+            printf("%c", is_ascii(b3) == 1 ? b3 : '.');
         }
-        else {
-            col++;
-            addr++;
-        }
+        printf("|\n");
     }
-    printf("\n\n");
 }
 
 void read_seg_tabl(phdr_tabl* tabl, size_t ph_offset, FILE* file)
