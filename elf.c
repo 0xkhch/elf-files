@@ -9,11 +9,24 @@ typedef struct {
     size_t len;
 } shdr_tabl;
 
-
 typedef struct {
     Elf32_Phdr* items;
     size_t len;
 } phdr_tabl;
+
+
+typedef struct {
+    uint8_t* items;
+    uint64_t cap;
+    uint64_t len;
+} byte_arr;
+
+byte_arr* init_arr(uint64_t len)
+{
+    byte_arr* arr = calloc(1, sizeof(byte_arr));
+    arr->len = len;
+    return arr;
+}
 
 shdr_tabl* shdr_tabl_init(size_t len)
 {
@@ -84,46 +97,22 @@ void dump_hdr(Elf32_Ehdr* hdr)
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
 }
 
-int read_hdr(Elf32_Ehdr* hdr, FILE* file)
+Elf32_Ehdr* read_hdr(Elf32_Ehdr* hdr, const byte_arr* arr)
 {
-    int n = 0;
-    n += fread(&hdr->e_ident, sizeof(*hdr->e_ident), EI_NIDENT, file);
-    n += fread(&hdr->e_type, sizeof(hdr->e_type), 1, file);
-    n += fread(&hdr->e_machine, sizeof(hdr->e_machine), 1, file);
-    n += fread(&hdr->e_version, sizeof(hdr->e_version), 1, file);
-    n += fread(&hdr->e_entry, sizeof(hdr->e_entry), 1, file);
-    n += fread(&hdr->e_phoff, sizeof(hdr->e_phoff), 1, file);
-    n += fread(&hdr->e_shoff, sizeof(hdr->e_shoff), 1, file);
-    n += fread(&hdr->e_flags, sizeof(hdr->e_flags), 1, file);
-    n += fread(&hdr->e_ehsize, sizeof(hdr->e_ehsize), 1, file);
-    n += fread(&hdr->e_phentsize, sizeof(hdr->e_phentsize), 1, file);
-    n += fread(&hdr->e_phnum, sizeof(hdr->e_phnum), 1, file);
-    n += fread(&hdr->e_shentsize, sizeof(hdr->e_shentsize), 1, file);
-    n += fread(&hdr->e_shnum, sizeof(hdr->e_shnum), 1, file);
-    n += fread(&hdr->e_shstrndx, sizeof(hdr->e_shstrndx), 1, file);
-
-
-    if (n != (EI_NIDENT + EI_NSTRUCT)) {
-        fprintf(stderr, "[ERROR] did not read the correct amount of elf header elements\n");
-        return -1;
-    }
+    Elf32_Ehdr* hdr = calloc(1, sizeof(Elf32_Ehdr));
     if (strncmp((const char*)hdr->e_ident, "\x7f" "ELF", EI_NIDENT) == 0) {
         fprintf(stderr, "[ERROR] Magic numbers do not match up..\n");
-        return -1;
     }
     if (hdr->e_type != ET_EXEC) {
         fprintf(stderr, "[ERROR] not an executable\n");
-        return -1;
     }
     if (hdr->e_machine != EM_RISCV) {
         fprintf(stderr, "[ERROR] only riscv executable\n");
-        return -1;
     }
     if (hdr->e_version != EV_CURRENT) {
         fprintf(stderr, "[ERROR] incorrect elf version\n");
-        return -1;
     }
-    return n;
+    return 0;
 }
 
 void dump_shdr(Elf32_Shdr* shdr, size_t i)
@@ -299,38 +288,46 @@ void dump_segments(phdr_tabl* tabl, FILE* file)
     }
 }
 
+byte_arr* read_entire_file(char* path)
+{
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) {
+        printf("File not found...\n");
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    int len  = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    byte_arr* arr = init_arr(len);
+    fread(arr->items, sizeof(uint8_t), arr->len, f);
+    return arr;
+}
+
 int main(int argc, char** argv)
 {
-    char* file_name;
-    FILE* file;
-    shdr_tabl* section_tabl;
-    phdr_tabl* segment_tabl;
+    // shdr_tabl* section_tabl;
+    // phdr_tabl* segment_tabl;
 
-    assert(argc == 2 && "[Usage] ./elf <file-name>");
-    file_name = argv[argc - 1];
-    file = fopen(file_name, "rb");
-    assert(file != NULL && "[ERROR] failed to open file..");
+    char* name = argv[argc - 1];
+    byte_arr* arr = read_entire_file(name);
 
     Elf32_Ehdr hdr = {0};
-    if(read_hdr(&hdr, file) < 0) {
+    if(read_hdr(&hdr, arr) < 0) {
         goto fail;
     }
-    // dump_hdr(&hdr);
-
-    section_tabl = shdr_tabl_init(hdr.e_shnum);
-    read_shdr_tabl(section_tabl, hdr.e_shoff, file);
-    // dump_shdr_names(section_tabl, hdr.e_shstrndx, file);
-    
-    segment_tabl = phdr_tabl_init(hdr.e_phnum);
-    read_seg_tabl(segment_tabl, hdr.e_phoff, file);
-    dump_segments(segment_tabl, file);
-
-    shdr_tabl_free(section_tabl);
-    phdr_tabl_free(segment_tabl);
-    fclose(file);
+    dump_hdr(&hdr);
+    // section_tabl = shdr_tabl_init(hdr.e_shnum);
+    // read_shdr_tabl(section_tabl, hdr.e_shoff, arr);
+    // dump_shdr_names(section_tabl, hdr.e_shstrndx, arr);
+    //
+    // segment_tabl = phdr_tabl_init(hdr.e_phnum);
+    // read_seg_tabl(segment_tabl, hdr.e_phoff, arr);
+    // dump_segments(segment_tabl, arr);
+    //
+    // shdr_tabl_free(section_tabl);
+    // phdr_tabl_free(segment_tabl);
     return 0;
 
 fail:
-    fclose(file);
     return 1;
 }
