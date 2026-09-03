@@ -28,6 +28,7 @@
 #define EV_CURRENT (1)
 #define ET_EXEC (2) // executable
 #define EM_RISCV (243) // riscv
+#define EM_X86_64 (62)
 
 typedef uint16_t Elf32_Half;
 typedef uint32_t Elf32_Word;
