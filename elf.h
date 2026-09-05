@@ -272,6 +272,12 @@ shdr_tabl* read_shdr_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
     tabl->items = calloc(hdr->e_shnum, sizeof(Elf32_Shdr));
     tabl->len = hdr->e_shnum;
 
+    // every section header is stored sequentially in the table,
+    // first entry always null and zeroed out
+    // seek until start of section header table
+    for (size_t i = 0; i < tabl->len; i++) {
+        tabl->items[i] = read_shdr(arr, hdr->e_shoff + (sizeof(Elf32_Shdr) * i));
+    }
     // copy over the names
     Elf32_Word buffer_size = tabl->items[hdr->e_shstrndx].sh_size;
     tabl->names = calloc(1, buffer_size + 1);
@@ -279,13 +285,7 @@ shdr_tabl* read_shdr_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
     // hdr->e_shstrndx is the section that holds the info for string table
     size_t offset = tabl->items[hdr->e_shstrndx].sh_offset; 
     memcpy(tabl->names, arr->items + offset, buffer_size);
-
-    // every section header is stored sequentially in the table,
-    // first entry always null and zeroed out
-    // seek until start of section header table
-    for (size_t i = 0; i < tabl->len; i++) {
-        tabl->items[i] = read_shdr(arr, hdr->e_shoff + (sizeof(Elf32_Shdr) * i));
-    }
+    
     return tabl;
 }
 
