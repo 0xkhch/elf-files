@@ -128,9 +128,9 @@ typedef struct {
 
 typedef struct {
     uint8_t* items;
-    uint64_t addr;
+    uint64_t addr; // addr to load the segment at
     uint64_t offset; //offset into the file
-    uint64_t type;
+    uint64_t type; // type of the segment
     uint64_t len;
 } segment;
 
@@ -147,11 +147,11 @@ typedef struct {
 } byte_arr;
 
 typedef struct {
-    byte_arr* contents;
-    Elf32_Ehdr* hdr;
-    shdr_tabl* shdr_table;
-    phdr_tabl* phdr_table;
-    seg_tabl* seg_table;
+    byte_arr* contents; // file contents
+    Elf32_Ehdr* hdr; // elf header
+    shdr_tabl* shdr_table; // section header table
+    phdr_tabl* phdr_table; // program header table
+    seg_tabl* seg_table; // segments table
 } elf_file;
 
 elf_file* read_elf(char* path);
