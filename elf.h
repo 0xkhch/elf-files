@@ -24,7 +24,8 @@
 #define EI_NSTRUCT (13)
 
 #define SH_NSTRUCT (10)
-
+#define EI_CLASS (4)
+#define ELFCLASS32 (1)
 #define EV_CURRENT (1)
 #define ET_EXEC (2) // executable
 #define EM_RISCV (243) // riscv
@@ -100,7 +101,6 @@ typedef struct {
 #define SHF_EXECINSTR 0x4
 #define SHF_MASKPROC 0xf0000000
 
-
 typedef struct {
     Elf32_Word p_type;
     Elf32_Off  p_offset;
@@ -114,4 +114,274 @@ typedef struct {
 
 #define PT_LOAD 1
 
+typedef struct {
+    Elf32_Shdr* items;
+    uint64_t len;
+    char* names;
+    uint64_t names_len;
+} shdr_tabl;
+
+typedef struct {
+    Elf32_Phdr* items;
+    uint64_t len;
+} phdr_tabl;
+
+typedef struct {
+    uint8_t* items;
+    uint64_t addr;
+    uint64_t offset; //offset into the file
+    uint64_t type;
+    uint64_t len;
+} segment;
+
+typedef struct {
+    segment** items;
+    uint64_t cap;
+    uint64_t len;
+} seg_tabl;
+
+typedef struct {
+    uint8_t* items;
+    uint64_t cap;
+    uint64_t len;
+} byte_arr;
+
+typedef struct {
+    byte_arr* contents;
+    Elf32_Ehdr* hdr;
+    shdr_tabl* shdr_table;
+    phdr_tabl* phdr_table;
+    seg_tabl* seg_table;
+} elf_file;
+
+elf_file* read_elf(char* path);
+void free_elf(elf_file* f);
+
+#ifdef ELF_IMPLEMENTATION
+
+byte_arr* init_arr(uint64_t len);
+byte_arr* read_entire_file(char* path);
+Elf32_Ehdr* read_hdr(const byte_arr* arr);
+Elf32_Shdr read_shdr(const byte_arr* arr, uint64_t offset);
+shdr_tabl* read_shdr_tabl(Elf32_Ehdr* hdr, const byte_arr* arr);
+Elf32_Phdr read_phdr(const byte_arr* arr, uint64_t offset);
+phdr_tabl* read_ph_tabl(Elf32_Ehdr* hdr, const byte_arr* arr);
+segment* init_seg(uint64_t len, uint64_t offset, uint64_t addr, uint64_t type);
+seg_tabl* read_seg_tabl(phdr_tabl* tabl, const byte_arr* arr);
+void free_arr(byte_arr* arr);
+void free_hdr(Elf32_Ehdr* hdr);
+void free_shdr_tabl(shdr_tabl* tabl);
+void free_phdr_tabl(phdr_tabl* tabl);
+void free_seg(segment* seg);
+void free_seg_tabl(seg_tabl* tabl);
+
+elf_file* read_elf(char* path)
+{
+    byte_arr* arr = read_entire_file(path);
+    if (arr == NULL) {
+        return NULL;
+    }
+    Elf32_Ehdr* hdr = read_hdr(arr);
+    if (strncmp((const char*)hdr->e_ident, "\x7f" "ELF", EI_NIDENT) == 0) {
+        fprintf(stderr, "[ERROR] Magic numbers do not match up...\n");
+        goto fail;
+    }
+    if (hdr->e_ident[EI_CLASS] != ELFCLASS32) {
+        fprintf(stderr, "[ERROR] only 32 bit executables are supported...\n");
+        goto fail;
+    }
+    if (hdr->e_type != ET_EXEC) {
+        fprintf(stderr, "[ERROR] not an executable...\n");
+        goto fail;
+    }
+    if (hdr->e_version != EV_CURRENT) {
+        fprintf(stderr, "[ERROR] incorrect elf version...\n");
+        goto fail;
+    }
+    shdr_tabl* sh_tabl = read_shdr_tabl(hdr, arr);
+    phdr_tabl* ph_tabl = read_ph_tabl(hdr, arr);
+    seg_tabl* seg_tabl = read_seg_tabl(ph_tabl, arr);
+
+    elf_file* f = calloc(1, sizeof(elf_file));
+    f->contents = arr;
+    f->hdr = hdr;
+    f->shdr_table = sh_tabl;
+    f->phdr_table = ph_tabl;
+    f->seg_table = seg_tabl;
+    return f;
+
+fail:
+    free_hdr(hdr);
+    free_arr(arr);
+    return NULL;
+}
+
+void free_elf(elf_file* f)
+{
+    free_arr(f->contents);
+    free_hdr(f->hdr);
+    free_shdr_tabl(f->shdr_table);
+    free_phdr_tabl(f->phdr_table);
+    free_seg_tabl(f->seg_table);
+    free(f);
+}
+/* byte array*/
+byte_arr* init_arr(uint64_t len)
+{
+    byte_arr* arr = calloc(1, sizeof(byte_arr));
+    arr->items = calloc(len, sizeof(uint8_t));
+    arr->len = len;
+    return arr;
+}
+
+byte_arr* read_entire_file(char* path)
+{
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "[ERROR] File not found...\n");
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    int len  = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    byte_arr* arr = init_arr(len);
+    fread(arr->items, sizeof(uint8_t), arr->len, f);
+    fclose(f);
+    return arr;
+}
+
+/* elf header*/
+Elf32_Ehdr* read_hdr(const byte_arr* arr)
+{
+    Elf32_Ehdr* hdr = calloc(1, sizeof(Elf32_Ehdr));
+    memcpy(hdr, arr->items, sizeof(Elf32_Ehdr));
+    return hdr;
+}
+
+/* elf section table*/
+Elf32_Shdr read_shdr(const byte_arr* arr, uint64_t offset)
+{
+    Elf32_Shdr shdr = {0};
+    memcpy(&shdr, arr->items + offset, sizeof(Elf32_Shdr));
+    return shdr;
+}
+
+shdr_tabl* read_shdr_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
+{
+    shdr_tabl* tabl = calloc(1, sizeof(shdr_tabl));
+    tabl->items = calloc(hdr->e_shnum, sizeof(Elf32_Shdr));
+    tabl->len = hdr->e_shnum;
+
+    // copy over the names
+    Elf32_Word buffer_size = tabl->items[hdr->e_shstrndx].sh_size;
+    tabl->names = calloc(1, buffer_size + 1);
+    tabl->names_len = buffer_size + 1;
+    // hdr->e_shstrndx is the section that holds the info for string table
+    size_t offset = tabl->items[hdr->e_shstrndx].sh_offset; 
+    memcpy(tabl->names, arr->items + offset, buffer_size);
+
+    // every section header is stored sequentially in the table,
+    // first entry always null and zeroed out
+    // seek until start of section header table
+    for (size_t i = 0; i < tabl->len; i++) {
+        tabl->items[i] = read_shdr(arr, hdr->e_shoff + (sizeof(Elf32_Shdr) * i));
+    }
+    return tabl;
+}
+
+/* elf program header*/
+Elf32_Phdr read_phdr(const byte_arr* arr, uint64_t offset)
+{
+    Elf32_Phdr phdr = {0};
+    memcpy(&phdr, arr->items + offset, sizeof(Elf32_Phdr));
+    return phdr;
+}
+
+phdr_tabl* read_ph_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
+{
+    phdr_tabl* tabl = (phdr_tabl*)calloc(1, sizeof(phdr_tabl));
+    tabl->items = (Elf32_Phdr*)calloc(hdr->e_phnum, sizeof(Elf32_Phdr));
+    tabl->len = hdr->e_phnum;
+    uint64_t phdr_offset = hdr->e_phoff;
+    for (size_t i = 0; i < tabl->len; i++) {
+        tabl->items[i] = read_phdr(arr, phdr_offset + (sizeof(Elf32_Phdr) * i));
+    }
+    return tabl;
+}
+
+/* segment table*/
+segment* init_seg(uint64_t len, uint64_t offset, uint64_t addr, uint64_t type)
+{
+    segment* seg = calloc(1, sizeof(segment));
+    seg->len = len;
+    seg->addr = addr;
+    seg->offset = offset;
+    seg->type = type;
+    seg->items = calloc(len, sizeof(uint8_t));
+    return seg;
+}
+
+seg_tabl* read_seg_tabl(phdr_tabl* tabl, const byte_arr* arr)
+{
+    seg_tabl* seg_table = calloc(1, sizeof(seg_tabl));
+    seg_table->cap = 0;
+    seg_table->len = tabl->len;
+    seg_table->items = calloc(seg_table->len, sizeof(segment*));
+    for (uint64_t i = 0; i < seg_table->len; i++) {
+        // if (tabl->items[i].p_type != PT_LOAD) continue;
+        uint64_t addr   = tabl->items[i].p_paddr;
+        uint64_t offset = tabl->items[i].p_offset;
+        uint64_t type   = tabl->items[i].p_type;
+        segment* seg    = init_seg(tabl->items[i].p_filesz, offset, addr, type);
+        for (uint64_t j = 0; j < tabl->items[i].p_filesz; j++) {
+            uint8_t byte = arr->items[offset + j];
+            seg->items[j] = byte;
+        }
+        seg_table->items[(seg_table->cap)++] = seg;
+    }
+    return seg_table;
+}
+
+/* free structs*/
+void free_arr(byte_arr* arr)
+{
+    free(arr->items);
+    free(arr);
+}
+
+
+void free_hdr(Elf32_Ehdr* hdr)
+{
+    free(hdr);
+}
+
+void free_shdr_tabl(shdr_tabl* tabl)
+{
+    free(tabl->items);
+    free(tabl->names);
+    free(tabl);
+}
+
+void free_phdr_tabl(phdr_tabl* tabl)
+{
+    free(tabl->items);
+    free(tabl);
+}
+
+void free_seg(segment* seg)
+{
+    free(seg->items);
+    free(seg);
+}
+
+void free_seg_tabl(seg_tabl* tabl)
+{
+    for (uint64_t i = 0; i < tabl->len; i++) {
+        free_seg(tabl->items[i]);
+    }
+    free(tabl->items);
+    free(tabl);
+}
+
+#endif // ELF_IMPLEMENTATION
 #endif // ELF_H_
