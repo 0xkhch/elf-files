@@ -2,8 +2,6 @@
 #define FIXED_STR_IMPLEMENTATION
 #include "fixed_str.h"
 
-#define REVERSE(val) (((val) & 0xff) << 24) | (((val) & 0xff00) << 8) | (((val) & 0xff0000) >> 8) | (((val) & 0xff000000) >> 24);
-
 typedef struct {
     Elf32_Shdr* items;
     size_t len;
@@ -139,16 +137,16 @@ shdr_tabl* read_shdr_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
     }
 
     Elf32_Word buffer_size = tabl->items[hdr->e_shstrndx].sh_size;
-    fs_t* buf = fs_init(buffer_size);
+    char* buf = calloc(1, buffer_size + 1);
     // hdr->e_shstrndx is the section that holds the info for string table
     size_t offset = tabl->items[hdr->e_shstrndx].sh_offset; 
-    memcpy(buf->items, arr->items + offset, buf->len);
+    memcpy(buf, arr->items + offset, buffer_size);
     for (size_t i = 0; i < tabl->len; i++) {
         Elf32_Word name_index = tabl->items[i].sh_name;
-        printf("\nSection %d name: %s at %d\n", (int) i, buf->items + name_index, name_index);
+        printf("\nSection %d name: %s at %d\n", (int) i, buf + name_index, name_index);
         dump_shdr(&tabl->items[i]);
     }
-    fs_free(buf);
+    free(buf);
     return tabl;
 }
 
@@ -178,39 +176,37 @@ void dump_phdr(Elf32_Phdr* phdr)
     printf("------------|------------|------------|------------|------------|------------|------------|\n");
 }
 
-size_t is_ascii(int c) {
+uint64_t is_ascii(int c) {
     // without control codes
-    if (c > 31 && c < 127) return 1;
-    return 0;
+    return c > 31 && c < 127;
 }
 
 void dump_seg(Elf32_Phdr* segment, const byte_arr* arr)
 {
-    size_t addr = segment->p_paddr;
-    Elf32_Word buffer[4] = {0};
-    for (size_t i = 0; i < segment->p_filesz / 16; i++) {
-        printf("%08x: ", (int)addr);
-        memcpy(buffer, arr->items + segment->p_offset + (sizeof(Elf32_Word) * i * 4), sizeof(Elf32_Word) * 4);
-        for (int j = 0; j < 4; j++) {
-            Elf32_Word word = REVERSE(buffer[j]);
-            printf("%08x ", word);
+    #define col_num 8
+    uint64_t addr   = segment->p_paddr;
+    uint64_t offset = segment->p_offset;
+    uint8_t buffer[col_num] = {0};
+
+    for (uint64_t i = 0; i < segment->p_filesz; i++) {
+        if (i % col_num == 0) {
+            printf("%08x: ", (unsigned)addr);
         }
-        // TODO: this could be done inside of the first loop i think
-        printf("|");
-        for (size_t k = 0; k < 4; k++) {
-            Elf32_Word reversed = REVERSE(buffer[k]); //bruh
-            unsigned char b0 = (unsigned char) (reversed >> 24) & 0xFF;
-            unsigned char b1 = (unsigned char) (reversed >> 16) & 0xFF;
-            unsigned char b2 = (unsigned char) (reversed >>  8) & 0xFF;
-            unsigned char b3 = (unsigned char) (reversed      ) & 0xFF;
-            printf("%c", is_ascii(b0) == 1 ? b0 : '.');
-            printf("%c", is_ascii(b1) == 1 ? b1 : '.');
-            printf("%c", is_ascii(b2) == 1 ? b2 : '.');
-            printf("%c", is_ascii(b3) == 1 ? b3 : '.');
+
+        uint8_t byte = arr->items[offset + i];
+        buffer[i % col_num] = byte;
+        printf("%04x ", byte);
+        addr++;
+
+        if ((i + 1) % col_num == 0) {
+            printf("|");
+            for (uint64_t j = 0; j < col_num; j++) {
+                printf("%c", is_ascii(buffer[j]) == 1 ? buffer[j] : '.');
+            }
+            printf("|\n");
         }
-        printf("|\n");
-        addr = addr + 4;
     }
+    printf("\n");
 }
 
 phdr_tabl* read_seg_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
@@ -232,7 +228,7 @@ void dump_segments(phdr_tabl* tabl, const byte_arr* arr)
     assert(tabl != NULL && "[ERROR] tabl is null");
 
     for (size_t i = 0; i < tabl->len; i++) {
-        if (tabl->items[i].p_type != PT_LOAD) continue;
+        // if (tabl->items[i].p_type != PT_LOAD) continue;
         printf("\nSegment %d\n", (int) i);
         dump_seg(&tabl->items[i], arr);
     }
