@@ -113,7 +113,7 @@ void dump_seg(segment* seg)
 
         uint8_t byte = seg->items[i];
         buffer[i % col_num] = byte;
-        printf("%04x ", byte);
+        printf("%02x ", byte);
         addr++;
 
         if ((i + 1) % col_num == 0) {
