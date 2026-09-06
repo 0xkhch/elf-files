@@ -135,7 +135,7 @@ typedef struct {
 } segment;
 
 typedef struct {
-    segment** items;
+    segment* items;
     uint64_t cap;
     uint64_t len;
 } seg_tabl;
@@ -166,7 +166,7 @@ Elf32_Shdr read_shdr(const byte_arr* arr, uint64_t offset);
 shdr_tabl* read_shdr_tabl(Elf32_Ehdr* hdr, const byte_arr* arr);
 Elf32_Phdr read_phdr(const byte_arr* arr, uint64_t offset);
 phdr_tabl* read_ph_tabl(Elf32_Ehdr* hdr, const byte_arr* arr);
-segment* init_seg(uint64_t len, uint64_t offset, uint64_t addr, uint64_t type);
+segment init_seg(uint64_t len, uint64_t offset, uint64_t addr, uint64_t type);
 seg_tabl* read_seg_tabl(phdr_tabl* tabl, const byte_arr* arr);
 void free_arr(byte_arr* arr);
 void free_hdr(Elf32_Ehdr* hdr);
@@ -310,14 +310,15 @@ phdr_tabl* read_ph_tabl(Elf32_Ehdr* hdr, const byte_arr* arr)
 }
 
 /* segment table*/
-segment* init_seg(uint64_t len, uint64_t offset, uint64_t addr, uint64_t type)
+segment init_seg(uint64_t len, uint64_t offset, uint64_t addr, uint64_t type)
 {
-    segment* seg = calloc(1, sizeof(segment));
-    seg->len = len;
-    seg->addr = addr;
-    seg->offset = offset;
-    seg->type = type;
-    seg->items = calloc(len, sizeof(uint8_t));
+    segment seg = {0};
+    // segment* seg = calloc(1, sizeof(segment));
+    seg.len = len;
+    seg.addr = addr;
+    seg.offset = offset;
+    seg.type = type;
+    seg.items = calloc(len, sizeof(uint8_t));
     return seg;
 }
 
@@ -326,16 +327,16 @@ seg_tabl* read_seg_tabl(phdr_tabl* tabl, const byte_arr* arr)
     seg_tabl* seg_table = calloc(1, sizeof(seg_tabl));
     seg_table->cap = 0;
     seg_table->len = tabl->len;
-    seg_table->items = calloc(seg_table->len, sizeof(segment*));
+    seg_table->items = calloc(seg_table->len, sizeof(segment));
     for (uint64_t i = 0; i < seg_table->len; i++) {
         // if (tabl->items[i].p_type != PT_LOAD) continue;
         uint64_t addr   = tabl->items[i].p_paddr;
         uint64_t offset = tabl->items[i].p_offset;
         uint64_t type   = tabl->items[i].p_type;
-        segment* seg    = init_seg(tabl->items[i].p_filesz, offset, addr, type);
-        for (uint64_t j = 0; j < tabl->items[i].p_filesz; j++) {
+        segment seg    = init_seg(tabl->items[i].p_filesz, offset, addr, type);
+        for (uint64_t j = 0; j < seg.len; j++) {
             uint8_t byte = arr->items[offset + j];
-            seg->items[j] = byte;
+            seg.items[j] = byte;
         }
         seg_table->items[(seg_table->cap)++] = seg;
     }
@@ -371,13 +372,12 @@ void free_phdr_tabl(phdr_tabl* tabl)
 void free_seg(segment* seg)
 {
     free(seg->items);
-    free(seg);
 }
 
 void free_seg_tabl(seg_tabl* tabl)
 {
     for (uint64_t i = 0; i < tabl->len; i++) {
-        free_seg(tabl->items[i]);
+        free_seg(&tabl->items[i]);
     }
     free(tabl->items);
     free(tabl);

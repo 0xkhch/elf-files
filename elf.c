@@ -131,7 +131,7 @@ void dump_segments(seg_tabl* tabl)
 {
     for (size_t i = 0; i < tabl->len; i++) {
         printf("\nSegment %d\n", (int) i);
-        dump_seg(tabl->items[i]);
+        dump_seg(&tabl->items[i]);
     }
 }
 
