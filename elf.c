@@ -130,7 +130,7 @@ void dump_seg(segment* seg)
 void dump_segments(seg_tabl* tabl)
 {
     for (size_t i = 0; i < tabl->len; i++) {
-        printf("\nSegment %d\n", (int) i);
+        printf("\nSegment %d at addr: 0x%08lx\n", (int) i, tabl->items[i].addr);
         dump_seg(&tabl->items[i]);
     }
 }
